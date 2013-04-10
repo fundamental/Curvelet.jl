@@ -154,7 +154,10 @@ function radialWindow(r)
     #x
 end
 
+#This should perform the wrapping portion of the windowing to get an equivilent
+#window that can utilize a smaller FFT
 function windowize(image, Wsize)
+    return image
     (X,Y)  = Wsize
     result = 0*im+zeros(X,Y)
     origin = get_origin(Wsize)
@@ -195,21 +198,289 @@ function windowize(image, Wsize)
         ystart=ynow;
         xnow=xnow+X;
     end
+    imagesc(abs(result))
+    println("updates___")
+    println(abs(result))
+    sleep(2)
     result
 end
 
-#println("one")
 #curveletTransform(ones(16,16))
-#println("two")
 #curveletTransform(ones(16,16))
-#println("three")
 #curveletTransform(ones(32,32))
-#println("four")
 #curveletTransform(ones(128,128))
-ct_res = curveletTransform(ones(8,8))
+#ct_res = curveletTransform(ones(8,8))
 #end
 #@printf("\n\n\n The report\n---------\n")
 #@iprofile report
 #@iprofile clear
 
+#Curvelab
+function fdct_wrapping_window(x)
+    wr = zeros(size(x,1), size(x,2))
+    wl = zeros(size(x,1), size(x,2))
+    x[abs(x) .< 2^-52] = 0 #TODO unneeded?
+    wr[(x .> 0)& (x .< 1)] = exp(1-1./(1-exp(1-1./x[(x .> 0)& (x .< 1)])))
+    wr[x .<= 0] = 1
+    wl[(x .> 0)& (x .< 1)] = exp(1-1./(1-exp(1-1./(1-x[(x .> 0)& (x .< 1)]))))
+    wl[x .>= 1] = 1
 
+    normalization = sqrt(wl.^2 + wr.^2)
+    wr ./= normalization
+    wl ./= normalization
+    return (wr, wl)
+end
+
+function the_stupid_beta(t)
+
+    #While the absolute value is not included in any of the equations, it seems
+    #to be required to properly calculate values with t~ -1.0
+    if(abs(t) <= 1)
+        sqrt(abs(sum([-5/32 21/32 -35/32 35/32 1/2].*(t.^[7 5 3 1 0]))))
+    elseif(1 <= t)
+        1.0
+    else
+        0.0
+    end
+end
+
+NU_A = 0.15 #constant from UDCT paper
+NU_B = 0.15
+function the_stupid_w1_tilda(t)
+    the_stupid_beta((pi-abs(t))/(pi*NU_A))
+end
+
+function the_stupid_w0_tilda(t)
+    the_stupid_w1_tilda(2*t*(1+NU_A))
+end
+
+function the_stupid_w0(w::(Float64,Float64))
+    the_stupid_w0_tilda(w[1]).*the_stupid_w0_tilda(w[2])
+end
+
+function the_stupid_w1(w::(Float64, Float64))
+    ((1-the_stupid_w0(w)^2).^0.5).*the_stupid_w1_tilda(w[1]).*the_stupid_w1_tilda(w[2])
+end
+
+function the_stupid_v1_tilda(t::Float64,N)
+    the_stupid_beta((2/N-1-t)/(2*NU_B/N))*the_stupid_beta((t+1)/(2NU_B/N))
+end
+function stupid_v_tilda(t,N,l)
+    the_stupid_v1_tilda(t-(2*(l-1))/N,N)
+end
+
+function T(theta)
+    if(-pi/4 <= theta && theta <= pi/4)
+        tan(theta)
+    elseif(pi/4 < theta && theta < pi/2)
+        2-tan(pi/2-theta)
+    elseif(-pi/2 < theta && theta < -pi/4)
+        -2-tan(pi/2-theta)
+    elseif(theta < -pi/2)
+        -2
+    else#  theta > pi/2
+        2
+    end
+end
+
+
+function the_stupid_vl(theta,N,l)
+    if(l<N)
+        stupid_v_tilda(float(T(theta)), N, l)
+    else
+        stupid_v_tilda(T(pi/2-theta),N,2*N+1-l)
+    end
+end
+
+function the_stupid_ul_tilda(w::(FloatingPoint, FloatingPoint), N, l)
+    the_stupid_vl(atan2(w[2],w[1]),N,l)*the_stupid_w1(w)
+end
+
+
+function the_stupid_ul(w::(FloatingPoint, FloatingPoint), N, l)
+    result = 0
+    if(l != 0)
+        for a=[-2pi 0.0 2pi]
+            for b=[-2pi 0.0 2pi]
+                wh = (w[1]+a,w[2]+b)
+                result += the_stupid_ul_tilda(wh, N, l)
+            end
+        end
+    else
+        result = the_stupid_w0(w)
+    end
+    result
+end
+
+#require("memoize.jl")
+#@memoize 
+function generate_the_stupid_window(size::Int, N::Int, l::Int)
+    fn = (x,y)->the_stupid_ul((x,y),N,l)
+
+    result = zeros(size, size)
+
+    #grid = linspace(-pi,pi,size)
+    grid = -pi+2*pi/size*(0:size-1)
+
+    #Calculate the window, allowing it to have its full image expressed by
+    #wraping around the edge
+    for x=1:size
+        for y=1:size
+            result[y,x] = fn(grid[x], grid[y])
+        end
+    end
+    return result
+end
+
+function teh_window(size, N, l)
+    if(l==0)
+        generate_the_stupid_window(size, N, l)*2
+    else
+        generate_the_stupid_window(size, N, l)*2*sqrt(2)
+    end
+end
+
+#performs the downsample by a factor of two in both directions
+function downsample(X)
+    fftshift(fft(ifft(ifftshift(X))[1:2:end,1:2:end]))
+    #N = int(size(X,1)/2)
+    #low  = 1:N/2
+    #mid  = N/2+1:N*3/2
+    #high = N*3/2+1:2*N
+    #result = zeros(N, N)
+    #result += X[mid,mid]
+    ##alias terms
+    #result += [flipud(X[high,mid]);flipud(X[low,mid])]
+    #result += [fliplr(X[mid,low]) fliplr(X[mid,high])]
+    #result += [fliplr(flipud(X[high,low])) fliplr(flipud(X[high,high]));fliplr(flipud(X[low,low])) fliplr(flipud(X[low,high]))];
+    #result
+end
+
+function upsample(X)
+    N = size(X,1)
+    xx = zeros(2*N,2*N)+0im
+    xx[1:2:end,1:2:end] = ifft(ifftshift(X))
+    fftshift(fft(xx))
+
+    #low  = [1:N/2]
+    #mid  = [N/2+1:N*3/2]
+    #high = [N*3/2+1:2*N]
+
+    #Y = zeros(2*N,2*N)+0im
+    #Y[N/2+1:N*3/2,N/2+1:N*3/2] = X
+    #Y[[low,high],mid] = 2*X
+    #Y[mid,[low,high]] = 2*X
+    #corner_row = [low,low,high,high]
+    #corner_col = [low,high,low,high]
+    #for i=1:length(corner_row)
+    #    Y[corner_row[i], corner_col[i]] = X[floor(i/N)+1,mod(i,N)+1]
+    #end
+    ##Y[,] = X
+    #Y
+end
+
+C1 = 3
+C2 = 2*C1+1
+
+function transform(x)
+    N = size(x,1)
+    println(N)
+    
+
+    print("Generating filters")
+    win = Array(Any, C2)
+    for i=0:C2-1
+        print('.')
+        win[i+1] = teh_window(N,C1,i)
+    end
+    println()
+
+    println("FFT")
+    S = fftshift(fft(x))
+
+    tf = Array(Any, C2)
+    print("Transforming")
+    for i=1:C2
+        print(".")
+        tf[i] = S.*win[i]
+    end
+    println()
+
+    ds = Array(Any, C2)
+    print("Downsampling")
+    #get the 256 inner values?
+    for i=1:C2
+        ds[i] = downsample(tf[i])
+        print(".")
+        #N = size(tf[i],1)
+        #ds[i] = tf[i][N/4+1:N*3/4,N/4+1:N*3/4]
+    end
+    println()
+    ds
+end
+
+function restore(ds)
+    N = size(ds[1],1)*2
+    
+    print("Generating filters")
+    win = Array(Any, C2)
+    for i=0:C2-1
+        print('.')
+        win[i+1] = teh_window(N,C1,i)
+    end
+    println()
+
+    us = Array(Any, C2)
+    print("upsampling")
+    for i=1:C2
+        us[i] = upsample(ds[i])
+        print(".")
+        #N = size(ds[i],1)*2
+        #us[i] = zeros(N,N)+0im
+        #us[i][N/4+1:N*3/4,N/4+1:N*3/4] = ds[i]
+    end
+    println()
+
+    prev = zeros(N,N)
+    print("Inverting")
+    for i=1:C2
+        print(".")
+        prev += us[i].*win[i]
+    end
+    println()
+
+    println("IFFT")
+    println("imaginary : ",norm(imag(ifft(ifftshift(prev)))))
+    real(ifft(ifftshift(prev)))
+end
+
+
+sample_data = rand(32,32)
+#sample_data -= mean(sample_data)
+##sample_data = data
+tmp = transform(sample_data)
+#ttmp = transform(ifft(ifftshift(tmp[1])))
+##ttmp[1] = fftshift(fft(restore(transform(real(ifft(ifftshift(ttmp[1]))))))).*teh_window(32,3,0)
+#println("mean is = ", mean(ttmp[1]))
+#tmp_one_old = tmp[1]
+##tmp[1] = fftshift(fft(restore(ttmp)))
+sample_hat  = restore(tmp)
+println("Done")
+println("Error was: ", norm(sample_data-sample_hat))
+@iprofile report
+@iprofile clear
+
+
+function fdct(x)
+    #perform a real to complex transform
+    #Let the finest level contain curvelets
+    #Lets assume the number of scales is ceil(log2(min(M,N)) - 3)
+    #Finally lets have 8 angles taken at the second finest level
+    #   __________
+    #   |\ |   | /|
+    #   |_\|___|/_|
+    #   |  |   |  |  approximately
+    #   |__|___| _|
+    #   | /|   |\ |
+    #   |/_|___|_\|
+end
