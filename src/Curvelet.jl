@@ -125,6 +125,25 @@ module Curvelet
         fftshift(y)/4
     end
 
+    function super_downsample(X)
+        Xx = fftshift(X)
+        y  = X[1:end/2,1:end/2]
+        y += X[1:end/2,end/2+1:end]
+        y += X[end/2+1:end,end/2+1:end]
+        y += X[end/2+1:end,1:end/2]
+        yy = y[1:end/2,:] + y[end/2+1:end,:]
+        yyy = yy[1:end/2,:] + yy[end/2+1:end,:]
+        fftshift(yyy)
+    end
+
+    function super_upsample(X)
+        Xx = fftshift(X)
+        XX = [Xx Xx; Xx Xx]
+        XXX = [XX; XX]
+        XXXX = [XXX; XXX]
+    end
+
+
     function upsample(X)
         N = size(X,1)
         xx = zeros(2*N,2*N)+0im
@@ -138,11 +157,11 @@ module Curvelet
     end
 
 
-    C1 = 6
+    C1 = 3
     C2 = 2*C1+1
 
-    function windows(Wsize,N)
-        win = Array(Any, 2*N+1)
+    function _gen_windows(Wsize,N)
+        win = Array(Matrix{Float64}, 2*N+1)
         for i=0:N
             print('.')
             win[i+1] = window(Wsize,N,i)
@@ -154,46 +173,77 @@ module Curvelet
         win
     end
 
-    curveletTransform(x) = curveletTransform(x, windows(size(x,1), C1))
+    immutable CurveletPlan
+        dim::Int
+        angles::Int
+        windows::Vector{Matrix{Float64}}
+        subplan::Union(CurveletPlan,Nothing)
+    end
 
-    function curveletTransform(x, win)
+    ## no need to print out a ton of matricies...
+    import Base.show
+    show(io::IO, cp::Curvelet.CurveletPlan) = print(io, "CurveletPlan")
+
+    function planCurveletTransform(dim::Int, N::Int)
+        @assert mod(dim,2)==0
+        @assert dim > 0
+        @assert N > 0
+
+        if(dim <= 16)
+            return nothing
+        end
+
+        CurveletPlan(dim,2*N+1,_gen_windows(dim,N),planCurveletTransform(int(dim/2), N))
+    end
+
+    type CurveletCoeff
+        HP::Vector{Matrix{Complex{Float64}}}
+        LP::Union(CurveletCoeff,Matrix{Complex{Float64}})
+    end
+
+    curveletTransform(x) = curveletTransform(x, planCurveletTransform(size(x,1), C1))
+
+    function curveletTransform(x::Matrix{Float64}, plan::CurveletPlan)
         println("FFT")
         S = fftshift(fft(x))
 
-        tf = Array(Any, C2)
+        tf = Array(Matrix{Complex{Float64}}, plan.angles)
         print("Transforming")
-        for i=1:C2
+        for i=1:plan.angles
             print(".")
-            tf[i] = S.*win[i]
+            tf[i] = S.*plan.windows[i]
         end
         println()
 
-        ds = Array(Any, C2)
+        ds = Array(Matrix{Complex{Float64}}, plan.angles)
         print("Downsampling")
         for i=1:C2
             ds[i] = downsample2(tf[i])
             print(".")
         end
         println()
-        ds
+        CurveletCoeff(ds[2:end], ds[1])
     end
 
-    function inverseCurveletTransform(ds, win)
-        Wsize = size(ds[1],1)*2
+    inverseCurveletTransform(x) = inverseCurveletTransform(x, planCurveletTransform(size(x.HP[1],1)*2, C1))
 
-        us = Array(Any, C2)
+    function inverseCurveletTransform(cc::CurveletCoeff, plan::CurveletPlan)
+        Wsize = plan.dim
+
+        us = Array(Matrix{Complex{Float64}}, plan.angles)
         print("upsampling")
-        for i=1:C2
-            us[i] = upsample2(ds[i])
+        for i=1:plan.angles-1
+            us[i+1] = upsample2(cc.HP[i])
             print(".")
         end
+        us[1] = upsample2(cc.LP)
         println()
 
         prev = zeros(Wsize,Wsize)
         print("Inverting")
-        for i=1:C2
+        for i=1:plan.angles
             print(".")
-            prev += us[i].*win[i]
+            prev += us[i].*plan.windows[i]
         end
         println()
 

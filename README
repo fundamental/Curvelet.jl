@@ -12,11 +12,13 @@ Hervé Chauris.
 
 Basic usage is as follows:
 
------------------
+----------------------------------------
+require("src/Curvelet.jl")
+
 x = rand(128,128)
-X = transform(x)
-y = recover(X)
------------------
+X = Curvelet.curveletTransform(x)
+y = Curvelet.inverseCurveletTransform(X)
+----------------------------------------
 
 Restrictions
 ------------
