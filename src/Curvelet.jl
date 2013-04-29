@@ -157,7 +157,7 @@ module Curvelet
     end
 
 
-    C1 = 3
+    C1 = 7
     C2 = 2*C1+1
 
     function _gen_windows(Wsize,N)
@@ -185,6 +185,7 @@ module Curvelet
     show(io::IO, cp::Curvelet.CurveletPlan) = print(io, "CurveletPlan")
 
     function planCurveletTransform(dim::Int, N::Int)
+        print("<planning>")
         @assert mod(dim,2)==0
         @assert dim > 0
         @assert N > 0
@@ -217,12 +218,55 @@ module Curvelet
 
         ds = Array(Matrix{Complex{Float64}}, plan.angles)
         print("Downsampling")
-        for i=1:C2
+        for i=1:plan.angles
             ds[i] = downsample2(tf[i])
             print(".")
         end
         println()
-        CurveletCoeff(ds[2:end], ds[1])
+
+        coeff = Array(Matrix{Complex{Float64}}, plan.angles)
+        print("creating coeff")
+        for i=1:plan.angles
+            coeff[i] = ifft(fftshift(ds[i]))
+            print(".")
+        end
+        println()
+
+
+        CurveletCoeff(coeff[2:end], curveletTransform(ds[1], plan.subplan))
+    end
+
+    function curveletTransform(S::Matrix{Complex{Float64}}, plan::Nothing)
+        ifft(fftshift(S))
+    end
+
+    function curveletTransform(S::Matrix{Complex{Float64}}, plan::CurveletPlan)
+        tf = Array(Matrix{Complex{Float64}}, plan.angles)
+        print("Transforming")
+        for i=1:plan.angles
+            print(".")
+            tf[i] = S.*plan.windows[i]
+        end
+        println()
+
+        ds = Array(Matrix{Complex{Float64}}, plan.angles)
+        print("Downsampling")
+        for i=1:plan.angles
+            ds[i] = downsample2(tf[i])
+            print(".")
+        end
+        println()
+
+        coeff = Array(Matrix{Complex{Float64}}, plan.angles)
+        print("creating coeff")
+        for i=1:plan.angles
+            coeff[i] = ifft(fftshift(ds[i]))
+            print(".")
+        end
+        println()
+
+
+        CurveletCoeff(coeff[2:end], curveletTransform(ds[1], plan.subplan))
     end
 
     inverseCurveletTransform(x) = inverseCurveletTransform(x, planCurveletTransform(size(x.HP[1],1)*2, C1))
@@ -233,10 +277,10 @@ module Curvelet
         us = Array(Matrix{Complex{Float64}}, plan.angles)
         print("upsampling")
         for i=1:plan.angles-1
-            us[i+1] = upsample2(cc.HP[i])
+            us[i+1] = upsample2(fftshift(fft(cc.HP[i])))
             print(".")
         end
-        us[1] = upsample2(cc.LP)
+        us[1] = upsample2(inverseCurveletTransform(cc.LP, plan.subplan, true))
         println()
 
         prev = zeros(Wsize,Wsize)
@@ -250,6 +294,34 @@ module Curvelet
         println("IFFT")
         println("imaginary : ",norm(imag(ifft(ifftshift(prev)))))
         real(ifft(ifftshift(prev)))
+    end
+    
+    function inverseCurveletTransform(cc::CurveletCoeff, plan::CurveletPlan, asdf::Bool)
+        Wsize = plan.dim
+
+        us = Array(Matrix{Complex{Float64}}, plan.angles)
+        print("upsampling")
+        for i=1:plan.angles-1
+            us[i+1] = upsample2(fftshift(fft(cc.HP[i])))
+            print(".")
+        end
+        println("types are = ", typeof(cc.LP), " ", typeof(plan.subplan))
+        us[1] = upsample2(inverseCurveletTransform(cc.LP, plan.subplan, true))
+        println()
+
+        prev = zeros(Wsize,Wsize)
+        print("Inverting")
+        for i=1:plan.angles
+            print(".")
+            prev += us[i].*plan.windows[i]
+        end
+        println()
+
+        prev
+    end
+
+    function inverseCurveletTransform(cc::Matrix{Complex{Float64}}, plan::Nothing, asdf::Bool)
+        fftshift(fft(cc))
     end
 
     #### Optimization methods
