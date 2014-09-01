@@ -1,5 +1,5 @@
-Curvelet.jl - The 2D Curvlet Transformation
-==========================================
+Curvelet.jl - The 2D Curvlet Transform
+======================================
 Mark McCurry
 0.0.0, April 12th 2013
 
@@ -14,7 +14,6 @@ Basic usage is as follows:
 
 ----------------------------------------
 require("src/Curvelet.jl")
-
 x = rand(128,128)
 X = Curvelet.curveletTransform(x)
 y = Curvelet.inverseCurveletTransform(X)
