@@ -5,10 +5,12 @@
 ### Common Lisp comment style will be used here for clarity
 module Curvelet
     export curveletTransform, inverseCurveletTransform
+    using DSP
+
 
     ### Eqn. 13 defines β(t) s.t. it smoothly maps the range -1...1 to 0...1
     ### This function is used to specify the transition regions of the windows
-    function _beta(t::FloatingPoint)
+    function _beta(t::AbstractFloat)
         ## While the absolute value is not included in any of the equations, it seems
         ## to be required to properly calculate values with t~ -1.0
         if(abs(t) <= 1)
@@ -30,9 +32,9 @@ module Curvelet
     ###
     _w1p(t) = _beta((pi-abs(t))/(pi*ETA_A))
     _w0p(t) = _w1p(2*t*(1+ETA_A))
-    _w0(w::(Float64,Float64)) = _w0p(w[1]).*_w0p(w[2])
+    _w0(w::Tuple{Float64,Float64}) = _w0p(w[1]).*_w0p(w[2])
 
-    _w1(w::(Float64, Float64)) = ((1-_w0(w)^2)^0.5)*_w1p(w[1])*_w1p(w[2])
+    _w1(w::Tuple{Float64, Float64}) = ((1-_w0(w)^2)^0.5)*_w1p(w[1])*_w1p(w[2])
 
     _v1p(t::Float64,N) = _beta((2/N-1-t)/(2*ETA_B/N))*_beta((t+1)/(2ETA_B/N))
 
@@ -64,12 +66,12 @@ module Curvelet
     end
 
     ### Intermediate in defining the windowing function for l!=0
-    function _ulp(w::(FloatingPoint, FloatingPoint), N, l)
+    function _ulp(w::Tuple{AbstractFloat, AbstractFloat}, N, l)
         _vl(atan2(w[2],w[1]),N,l)*_w1(w)
     end
 
 
-    function _ul(w::(FloatingPoint, FloatingPoint), N::Int, l::Int)
+    function _ul(w::Tuple{AbstractFloat, AbstractFloat}, N::Int, l::Int)
         if(l==0)
             _w0(w)
         else
@@ -113,31 +115,31 @@ module Curvelet
 
     ### Performs the downsample by a factor of two in both directions
     function downsample(X)
-        fftshift(fft(ifft(ifftshift(X))[1:2:end,1:2:end]))
+        DSP.fftshift(DSP.fft(DSP.ifft(DSP.ifftshift(X))[1:2:end,1:2:end]))
     end
 
     function downsample2(X)
-        Xx = fftshift(X)
-        y  = X[1:end/2,1:end/2]
-        y += X[1:end/2,end/2+1:end]
-        y += X[end/2+1:end,end/2+1:end]
-        y += X[end/2+1:end,1:end/2]
-        fftshift(y)/4
+        Xx = DSP.fftshift(X)
+        y  = X[1:Int(end/2),1:Int(end/2)]
+        y += X[1:Int(end/2),Int(end/2)+1:end]
+        y += X[Int(end/2)+1:end,Int(end/2)+1:end]
+        y += X[Int(end/2)+1:end,1:Int(end/2)]
+        DSP.fftshift(y)/4
     end
 
     function super_downsample(X)
-        Xx = fftshift(X)
+        Xx = DSP.fftshift(X)
         y  = X[1:end/2,1:end/2]
         y += X[1:end/2,end/2+1:end]
         y += X[end/2+1:end,end/2+1:end]
         y += X[end/2+1:end,1:end/2]
         yy = y[1:end/2,:] + y[end/2+1:end,:]
         yyy = yy[1:end/2,:] + yy[end/2+1:end,:]
-        fftshift(yyy)
+        DSP.fftshift(yyy)
     end
 
     function super_upsample(X)
-        Xx = fftshift(X)
+        Xx = DSP.fftshift(X)
         XX = [Xx Xx; Xx Xx]
         XXX = [XX; XX]
         XXXX = [XXX; XXX]
@@ -147,12 +149,12 @@ module Curvelet
     function upsample(X)
         N = size(X,1)
         xx = zeros(2*N,2*N)+0im
-        xx[1:2:end,1:2:end] = ifft(ifftshift(X))
-        fftshift(fft(xx))
+        xx[1:2:end,1:2:end] = DSP.ifft(DSP.ifftshift(X))
+        DSP.fftshift(DSP.fft(xx))
     end
 
     function upsample2(X)
-        Xx = fftshift(X)
+        Xx = DSP.fftshift(X)
         [Xx Xx; Xx Xx]
     end
 
@@ -161,23 +163,23 @@ module Curvelet
     C2 = 2*C1+1
 
     function _gen_windows(Wsize,N)
-        win = Array(Matrix{Float64}, 2*N+1)
+        win = Array{Matrix{Float64}}(2*N+1)
         for i=0:N
             print('.')
             win[i+1] = window(Wsize,N,i)
         end
         for i=N+1:2N
-            win[i+1] = flipud(win[i-N+1])'
-            win[i+1][:,[2:end, 1]] = win[i+1][:, [1:end]]
+            win[i+1] = flipdim(win[i-N+1],1)'
+            win[i+1][:,[2:end..., 1]] = win[i+1][:, [1:end...]]
         end
         win
     end
 
-    immutable CurveletPlan
+    struct CurveletPlan
         dim::Int
         angles::Int
         windows::Vector{Matrix{Float64}}
-        subplan::Union(CurveletPlan,Nothing)
+        subplan::Union{CurveletPlan,Void}
     end
 
     ## no need to print out a ton of matricies...
@@ -194,19 +196,19 @@ module Curvelet
             return nothing
         end
 
-        CurveletPlan(dim,2*N+1,_gen_windows(dim,N),planCurveletTransform(int(dim/2), N))
+        CurveletPlan(dim,2*N+1,_gen_windows(dim,N),planCurveletTransform(Int(dim/2), N))
     end
 
-    type CurveletCoeff
+    struct CurveletCoeff
         HP::Vector{Matrix{Complex{Float64}}}
-        LP::Union(CurveletCoeff,Matrix{Complex{Float64}})
+        LP::Union{CurveletCoeff,Matrix{Complex{Float64}}}
     end
 
     curveletTransform(x) = curveletTransform(x, planCurveletTransform(size(x,1), C1))
 
     function curveletTransform(x::Matrix{Float64}, plan::CurveletPlan)
         println("FFT")
-        S = fftshift(fft(x))
+        S = DSP.fftshift(DSP.fft(x))
 
         tf = Array(Matrix{Complex{Float64}}, plan.angles)
         print("Transforming")
@@ -227,7 +229,7 @@ module Curvelet
         coeff = Array(Matrix{Complex{Float64}}, plan.angles)
         print("creating coeff")
         for i=1:plan.angles
-            coeff[i] = ifft(fftshift(ds[i]))
+            coeff[i] = DSP.ifft(DSP.fftshift(ds[i]))
             print(".")
         end
         println()
@@ -236,8 +238,8 @@ module Curvelet
         CurveletCoeff(coeff[2:end], curveletTransform(ds[1], plan.subplan))
     end
 
-    function curveletTransform(S::Matrix{Complex{Float64}}, plan::Nothing)
-        ifft(fftshift(S))
+    function curveletTransform(S::Matrix{Complex{Float64}}, plan::Void)
+        DSP.ifft(DSP.fftshift(S))
     end
 
     function curveletTransform(S::Matrix{Complex{Float64}}, plan::CurveletPlan)
@@ -260,7 +262,7 @@ module Curvelet
         coeff = Array(Matrix{Complex{Float64}}, plan.angles)
         print("creating coeff")
         for i=1:plan.angles
-            coeff[i] = ifft(fftshift(ds[i]))
+            coeff[i] = DSP.ifft(DSP.fftshift(ds[i]))
             print(".")
         end
         println()
@@ -274,12 +276,13 @@ module Curvelet
     function inverseCurveletTransform(cc::CurveletCoeff, plan::CurveletPlan)
         Wsize = plan.dim
 
-        us = Array(Matrix{Complex{Float64}}, plan.angles)
+        us = Array{Matrix{Complex{Float64}}}(plan.angles)
         print("upsampling")
         for i=1:plan.angles-1
-            us[i+1] = upsample2(fftshift(fft(cc.HP[i])))
+            us[i+1] = upsample2(DSP.fftshift(DSP.fft(cc.HP[i])))
             print(".")
         end
+        println()
         us[1] = upsample2(inverseCurveletTransform(cc.LP, plan.subplan, true))
         println()
 
@@ -292,20 +295,21 @@ module Curvelet
         println()
 
         println("IFFT")
-        println("imaginary : ",norm(imag(ifft(ifftshift(prev)))))
-        real(ifft(ifftshift(prev)))
+        println("imaginary : ",norm(imag(DSP.ifft(DSP.ifftshift(prev)))))
+        real(DSP.ifft(DSP.ifftshift(prev)))
     end
     
     function inverseCurveletTransform(cc::CurveletCoeff, plan::CurveletPlan, asdf::Bool)
         Wsize = plan.dim
 
-        us = Array(Matrix{Complex{Float64}}, plan.angles)
+        us = Array{Matrix{Complex{Float64}}}(plan.angles)
         print("upsampling")
         for i=1:plan.angles-1
-            us[i+1] = upsample2(fftshift(fft(cc.HP[i])))
+            us[i+1] = upsample2(DSP.fftshift(DSP.fft(cc.HP[i])))
             print(".")
         end
-        println("types are = ", typeof(cc.LP), " ", typeof(plan.subplan))
+        println()
+        #println("types are = ", typeof(cc.LP), " ", typeof(plan.subplan))
         us[1] = upsample2(inverseCurveletTransform(cc.LP, plan.subplan, true))
         println()
 
@@ -320,8 +324,8 @@ module Curvelet
         prev
     end
 
-    function inverseCurveletTransform(cc::Matrix{Complex{Float64}}, plan::Nothing, asdf::Bool)
-        fftshift(fft(cc))
+    function inverseCurveletTransform(cc::Matrix{Complex{Float64}}, plan::Void, asdf::Bool)
+        DSP.fftshift(DSP.fft(cc))
     end
 
     #### Optimization methods
@@ -380,7 +384,7 @@ module Curvelet
 
     function fast_window_definition(size::Int, N::Int, l::Int)
         if(l>N)
-            result = flipud(fast_window_definition(size,N,N-l))'
+            result = flipdim(fast_window_definition(size,N,N-l),1)'
             result[:,[2:end, 1]] = result[:, [1:end]]
             return result
         end
