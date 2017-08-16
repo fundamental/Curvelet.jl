@@ -5,6 +5,7 @@
 ### Common Lisp comment style will be used here for clarity
 module Curvelet
     export curveletTransform, inverseCurveletTransform
+    using FFTW
     using DSP
 
     Curvelet_verbose = false
