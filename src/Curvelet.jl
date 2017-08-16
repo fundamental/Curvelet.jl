@@ -7,6 +7,8 @@ module Curvelet
     export curveletTransform, inverseCurveletTransform
     using DSP
 
+    Curvelet_verbose = false
+
 
     ### Eqn. 13 defines β(t) s.t. it smoothly maps the range -1...1 to 0...1
     ### This function is used to specify the transition regions of the windows
@@ -165,7 +167,9 @@ module Curvelet
     function _gen_windows(Wsize,N)
         win = Array{Matrix{Float64}}(2*N+1)
         for i=0:N
-            print('.')
+            if(Curvelet_verbose)
+                print('.')
+            end
             win[i+1] = window(Wsize,N,i)
         end
         for i=N+1:2N
@@ -187,7 +191,9 @@ module Curvelet
     show(io::IO, cp::Curvelet.CurveletPlan) = print(io, "CurveletPlan")
 
     function planCurveletTransform(dim::Int, N::Int)
-        print("<planning>")
+        if(Curvelet_verbose)
+            print("<planning>")
+        end
         @assert mod(dim,2)==0
         @assert dim > 0
         @assert N > 0
@@ -207,32 +213,52 @@ module Curvelet
     curveletTransform(x) = curveletTransform(x, planCurveletTransform(size(x,1), C1))
 
     function curveletTransform(x::Matrix{Float64}, plan::CurveletPlan)
-        println("FFT")
+        if(Curvelet_verbose)
+            println("FFT")
+        end
         S = DSP.fftshift(DSP.fft(x))
 
-        tf = Array(Matrix{Complex{Float64}}, plan.angles)
-        print("Transforming")
+        tf = Array{Matrix{Complex{Float64}}}(plan.angles)
+        if(Curvelet_verbose)
+            print("Transforming")
+        end
         for i=1:plan.angles
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
             tf[i] = S.*plan.windows[i]
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
-        ds = Array(Matrix{Complex{Float64}}, plan.angles)
-        print("Downsampling")
+        ds = Array{Matrix{Complex{Float64}}}(plan.angles)
+        if(Curvelet_verbose)
+            print("Downsampling")
+        end
         for i=1:plan.angles
             ds[i] = downsample2(tf[i])
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
-        coeff = Array(Matrix{Complex{Float64}}, plan.angles)
-        print("creating coeff")
+        coeff = Array{Matrix{Complex{Float64}}}(plan.angles)
+        if(Curvelet_verbose)
+            print("creating coeff")
+        end
         for i=1:plan.angles
             coeff[i] = DSP.ifft(DSP.fftshift(ds[i]))
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
 
         CurveletCoeff(coeff[2:end], curveletTransform(ds[1], plan.subplan))
@@ -243,29 +269,47 @@ module Curvelet
     end
 
     function curveletTransform(S::Matrix{Complex{Float64}}, plan::CurveletPlan)
-        tf = Array(Matrix{Complex{Float64}}, plan.angles)
-        print("Transforming")
+        tf = Array{Matrix{Complex{Float64}}}(plan.angles)
+        if(Curvelet_verbose)
+            print("Transforming")
+        end
         for i=1:plan.angles
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
             tf[i] = S.*plan.windows[i]
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
-        ds = Array(Matrix{Complex{Float64}}, plan.angles)
-        print("Downsampling")
+        ds = Array{Matrix{Complex{Float64}}}(plan.angles)
+        if(Curvelet_verbose)
+            print("Downsampling")
+        end
         for i=1:plan.angles
             ds[i] = downsample2(tf[i])
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
-        coeff = Array(Matrix{Complex{Float64}}, plan.angles)
-        print("creating coeff")
+        coeff = Array{Matrix{Complex{Float64}}}(plan.angles)
+        if(Curvelet_verbose)
+            print("creating coeff")
+        end
         for i=1:plan.angles
             coeff[i] = DSP.ifft(DSP.fftshift(ds[i]))
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
 
         CurveletCoeff(coeff[2:end], curveletTransform(ds[1], plan.subplan))
@@ -277,25 +321,41 @@ module Curvelet
         Wsize = plan.dim
 
         us = Array{Matrix{Complex{Float64}}}(plan.angles)
-        print("upsampling")
+        if(Curvelet_verbose)
+            print("upsampling")
+        end
         for i=1:plan.angles-1
             us[i+1] = upsample2(DSP.fftshift(DSP.fft(cc.HP[i])))
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
         us[1] = upsample2(inverseCurveletTransform(cc.LP, plan.subplan, true))
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
         prev = zeros(Wsize,Wsize)
-        print("Inverting")
+        if(Curvelet_verbose)
+            print("Inverting")
+        end
         for i=1:plan.angles
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
             prev += us[i].*plan.windows[i]
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
-        println("IFFT")
-        println("imaginary : ",norm(imag(DSP.ifft(DSP.ifftshift(prev)))))
+        if(Curvelet_verbose)
+            println("IFFT")
+            println("imaginary : ",norm(imag(DSP.ifft(DSP.ifftshift(prev)))))
+        end
         real(DSP.ifft(DSP.ifftshift(prev)))
     end
     
@@ -303,23 +363,37 @@ module Curvelet
         Wsize = plan.dim
 
         us = Array{Matrix{Complex{Float64}}}(plan.angles)
-        print("upsampling")
+        if(Curvelet_verbose)
+            print("upsampling")
+        end
         for i=1:plan.angles-1
             us[i+1] = upsample2(DSP.fftshift(DSP.fft(cc.HP[i])))
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
         #println("types are = ", typeof(cc.LP), " ", typeof(plan.subplan))
         us[1] = upsample2(inverseCurveletTransform(cc.LP, plan.subplan, true))
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
         prev = zeros(Wsize,Wsize)
-        print("Inverting")
+        if(Curvelet_verbose)
+            print("Inverting")
+        end
         for i=1:plan.angles
-            print(".")
+            if(Curvelet_verbose)
+                print(".")
+            end
             prev += us[i].*plan.windows[i]
         end
-        println()
+        if(Curvelet_verbose)
+            println()
+        end
 
         prev
     end
