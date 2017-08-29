@@ -106,7 +106,7 @@ begin# reconstruction_example()
     #grab around 30% of the points
     px_rate = 0.30
 
-    N = size(observation,1)
+    N = size(sample_data,1)
     good_px = zeros(size(sample_data))
     for i=1:N, j=1:N
         good_px[i,j] = (rand() < px_rate) ? 1 : 0
